@@ -1,7 +1,7 @@
 import { text, json } from 'd3-request';
 import { dsvFormat } from 'd3-dsv';
 
-import { match, transpose, chain, iter, arrayEqual, saveFile, compare, asArray, loadTextFile, addFileProtocol } from './reusables';
+import { transpose, chain, iter, arrayEqual, saveFile, compare, asArray, loadTextFile, addFileProtocol } from './reusables';
 import { ArgumentTypeError, WrongSchemaError, MixedTypeError, FileNotFoundError } from './errors';
 import Row from './row';
 import GroupedDataFrame from './groupedDataframe';
@@ -159,7 +159,7 @@ class DataFrame {
      *      'column2': [3, 4, 5, 6],
      * }, ['column1', 'column2'])
      *
-     * new Data Frame([
+     * new DataFrame([
      *      [1, 6, 9, 10, 12],
      *      [1, 2],
      *      [6, 6, 9, 8, 9, 12],
@@ -187,6 +187,7 @@ class DataFrame {
     }
 
     _columnsAreEquals(columns, columns2 = this[__columns__]) {
+        if (columns.length !== columns2.length) return false;
         for (const key of Object.keys(columns)) {
             if (columns[key] !== columns2[key]) return false;
         }
@@ -216,41 +217,29 @@ class DataFrame {
         });
     }
 
+    _inferColumnsFromRows(rows) {
+        const rowsSample = [...rows.slice(0, 10), ...rows.slice(-10, -1)];
+        return Array.from(new Set(rowsSample.reduce((p, n) => [p, ...Object.keys(n)], [])));
+    }
+
+    _buildRows(rows, columns) {
+        return rows.map(row => new Row(row, columns));
+    }
+
     _build(data, columns) {
-        return match(data,
-            [
-                (value) => (value instanceof DataFrame),
-                () => this._fromArray([...data[__rows__]], columns ? columns : data[__columns__]),
-            ],
-            [
-                (value) => (value instanceof Array && value.length !== 0),
-                () => this._fromArray(data, columns ? columns :
-                     [...new Set([
-                         ...data.slice(0, 10),
-                         ...data.slice(-10, -1),
-                     ].map(row => Object.keys(row)).reduce((p, n) => [...p, ...n]))]
-                ),
-            ],
-            [
-                (value) => (value instanceof Array && value.length === 0),
-                () => this._fromArray(data, columns ? columns : []),
-            ],
-            [
-                (value) => (value instanceof Object),
-                () => this._fromDict(data, columns ? columns : Object.keys(data)),
-            ],
-            [
-                () => true,
-                () => {throw new ArgumentTypeError(data, 'DataFrame | Array | Object');},
-            ]);
-    }
-
-    _fromDict(dict, columns) {
-        return [transpose(Object.values(dict)).map(row => new Row(row, columns)), columns];
-    }
-
-    _fromArray(array, columns) {
-        return [array.map(row => new Row(row, columns)), columns];
+        if (data instanceof DataFrame) {
+            const cols = columns || data[__columns__];
+            return [this._buildRows(Array.from(data[__rows__]), cols), cols];
+        }
+        if (data instanceof Array) {
+            const cols = columns || this._inferColumnsFromRows(data);
+            return [this._buildRows(Array.from(data), cols), cols];
+        }
+        if (data instanceof Object) {
+            const cols = columns || Object.keys(data);
+            return [this._buildRows(transpose(Object.values(data)), cols), cols];
+        }
+        throw new ArgumentTypeError(data, 'DataFrame | Array | Object');
     }
 
     _joinByType(gdf1, gdf2, type, newColumns) {
